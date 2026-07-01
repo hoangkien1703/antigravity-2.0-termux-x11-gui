@@ -79,19 +79,56 @@ You should see output indicating successful rewrites (e.g. `ubfx patches : 15`, 
 
 ---
 
-### Step 5: Configure the Launcher and Desktop Shortcut
+### Step 5: Configure Keyring and DBus (Fixes Persistent Login Issue)
 
-1. Create a launcher script at `/data/data/com.termux/files/usr/bin/antigravity` on your Termux host:
+To prevent having to log in on every launch, you must install `gnome-keyring` and `dbus` inside the Ubuntu container, and create a default unencrypted keyring that auto-unlocks at startup:
+
+1. Install the keyring and D-Bus packages inside the Ubuntu container:
+   ```bash
+   proot-distro login ubuntu --shared-tmp -- apt-get update && proot-distro login ubuntu --shared-tmp -- apt-get install -y gnome-keyring dbus
+   ```
+
+2. Create a default keyring with a blank password so GNOME Keyring daemon can unlock it automatically without graphical password prompts:
+   ```bash
+   # Ensure the keyrings directory exists inside the container rootfs
+   mkdir -p /data/data/com.termux/files/usr/var/lib/proot-distro/containers/ubuntu/rootfs/root/.local/share/keyrings/
+
+   # Create the Default_keyring configuration
+   cat > /data/data/com.termux/files/usr/var/lib/proot-distro/containers/ubuntu/rootfs/root/.local/share/keyrings/Default_keyring.keyring << 'EOF'
+   [keyring]
+   display-name=Default keyring
+   ctime=0
+   mtime=0
+   lock-on-idle=false
+   lock-after=false
+   EOF
+
+   # Set it as the default keyring
+   echo -n "Default_keyring" > /data/data/com.termux/files/usr/var/lib/proot-distro/containers/ubuntu/rootfs/root/.local/share/keyrings/default
+
+   # Restrict directory and file permissions
+   proot-distro login ubuntu --shared-tmp -- chmod 700 /root/.local/share/keyrings
+   proot-distro login ubuntu --shared-tmp -- chmod 600 /root/.local/share/keyrings/default /root/.local/share/keyrings/Default_keyring.keyring
+   ```
+
+---
+
+### Step 6: Configure the Launcher and Desktop Shortcut
+
+1. Create a launcher script at `/data/data/com.termux/files/usr/bin/antigravity` on your Termux host. This starts a D-Bus session and launches `gnome-keyring-daemon` inside the container before executing the app:
    ```bash
    #!/data/data/com.termux/files/usr/bin/bash
+   # Antigravity GUI Runner for Termux-X11
    export DISPLAY=:0
    export PULSE_SERVER=127.0.0.1
-   exec proot-distro login ubuntu --shared-tmp -- env DISPLAY=:0 PULSE_SERVER=127.0.0.1 /usr/local/bin/antigravity --no-sandbox "$@"
+   exec proot-distro login ubuntu --shared-tmp -- env DISPLAY=:0 PULSE_SERVER=127.0.0.1 dbus-run-session -- bash -c 'gnome-keyring-daemon --start --components=secrets && exec /usr/local/bin/antigravity --no-sandbox "$@"' -- "$@"
    ```
+
 2. Make the launcher executable:
    ```bash
    chmod +x /data/data/com.termux/files/usr/bin/antigravity
    ```
+
 3. Set up the desktop shortcut (`~/Desktop/antigravity.desktop`):
    ```desktop
    [Desktop Entry]
